@@ -1,0 +1,1217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>定規バトル (Ruler Battle)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #181920;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+    }
+    #gameCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      touch-action: none;
+    }
+    .scrollable-touch {
+      touch-action: pan-y !important;
+      -webkit-overflow-scrolling: touch !important;
+      overscroll-behavior: contain !important;
+    }
+    .custom-range {
+      accent-color: #f59e0b;
+    }
+  </style>
+</head>
+<body>
+
+<div id="game-container">
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- 画面右上 固定設定ボタン -->
+  <button id="btn-open-settings" class="fixed top-3 right-3 z-40 bg-slate-800/90 hover:bg-slate-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-lg border border-white/20 backdrop-blur-md flex items-center gap-1.5 active:scale-95 transition-all">
+    ⚙️ 設定・物理調整
+  </button>
+
+  <!-- UIオーバーレイ（ターン表示・スピンバー） -->
+  <div class="absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-3.5">
+    <div class="flex justify-between items-start pointer-events-auto">
+      <div id="turn-badge" class="bg-black/75 backdrop-blur-md px-4 py-2 rounded-full text-white text-xs font-bold border border-white/20 flex items-center gap-2 shadow-lg">
+        <div id="turn-indicator" class="w-3 h-3 rounded-full bg-blue-500 shadow-sm"></div>
+        <span id="turn-text">P1 のターン</span>
+      </div>
+    </div>
+
+    <div class="flex flex-col items-center gap-2 pointer-events-auto mb-1">
+      <div class="bg-black/75 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/20 flex items-center gap-3 text-white text-xs shadow-lg">
+        <span class="text-slate-300 font-medium">スピン回転:</span>
+        <input type="range" id="spin-slider" min="-100" max="100" value="0" class="w-28 accent-pink-500 cursor-pointer">
+        <span id="spin-val" class="w-9 text-right font-mono text-pink-400 font-bold">0%</span>
+      </div>
+      <div class="text-[10px] text-white/50 tracking-wider">定規を引っ張って離すと発射</div>
+    </div>
+  </div>
+</div>
+
+<!-- 設定 ＆ 物理調整 統合モーダル -->
+<div id="settings-modal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex justify-center items-start overflow-y-auto p-3 sm:p-5 scrollable-touch">
+  <div class="bg-[#1f222e] text-white rounded-2xl w-full max-w-lg border border-white/10 shadow-2xl overflow-hidden my-auto scrollable-touch">
+    
+    <!-- モーダルヘッダー -->
+    <div class="sticky top-0 bg-[#1f222e]/95 backdrop-blur-md px-5 py-3.5 border-b border-white/10 flex justify-between items-center z-10">
+      <div>
+        <h2 class="text-base sm:text-lg font-black flex items-center gap-2">
+          <span>📐 定規バトル 設定 &amp; 物理調整</span>
+        </h2>
+        <p class="text-[11px] text-slate-400">人数・定規の変更も物理係数の微調整もここで一括設定</p>
+      </div>
+      <button id="btn-close-modal" class="text-slate-400 hover:text-white p-1 text-sm font-bold">✕</button>
+    </div>
+
+    <!-- モーダルコンテンツ -->
+    <div class="p-5 space-y-5 pb-28 scrollable-touch">
+      
+      <!-- 最上部 バトル開始ボタン -->
+      <button id="btn-apply-top" class="w-full bg-amber-400 hover:bg-amber-300 active:scale-98 text-slate-950 font-black py-3 rounded-xl text-sm shadow-xl flex items-center justify-center gap-2 transition-all">
+        ⚔️ 適用してバトル再開！
+      </button>
+
+      <!-- リアルタイム物理調整 -->
+      <div class="bg-[#171922] p-4 rounded-xl border border-white/10 space-y-4">
+        <div class="flex justify-between items-center border-b border-white/10 pb-2">
+          <span class="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+            🛠️ リアルタイム物理調整 (常時編集可能)
+          </span>
+          <button id="btn-reset-physics" class="text-[11px] bg-white/10 hover:bg-white/20 text-slate-300 px-2.5 py-1 rounded-md active:scale-95 transition-all">
+            標準値にリセット
+          </button>
+        </div>
+
+        <!-- 1. 最大初速 -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs font-semibold">
+            <span class="text-slate-300">🚀 最大初速・威力</span>
+            <span id="label-power" class="text-amber-400 font-mono">28.5</span>
+          </div>
+          <input type="range" id="param-power" min="5.0" max="35.0" step="0.5" value="28.5" class="w-full custom-range">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>マイルド (5.0)</span>
+            <span>基準 (20.0)</span>
+            <span>超高速 (35.0)</span>
+          </div>
+        </div>
+
+        <!-- 2. 摩擦係数 -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs font-semibold">
+            <span class="text-slate-300">🧊 机の摩擦係数 (停止しやすさ)</span>
+            <span id="label-friction" class="text-amber-400 font-mono">0.930</span>
+          </div>
+          <input type="range" id="param-friction" min="0.840" max="0.980" step="0.002" value="0.930" class="w-full custom-range">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>急ブレーキ (0.840)</span>
+            <span>基準 (0.920)</span>
+            <span>すべる (0.980)</span>
+          </div>
+        </div>
+
+        <!-- 3. 反発係数 -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs font-semibold">
+            <span class="text-slate-300">💥 反発係数 (跳ね返り)</span>
+            <span id="label-restitution" class="text-amber-400 font-mono">0.50</span>
+          </div>
+          <input type="range" id="param-restitution" min="0.05" max="0.85" step="0.05" value="0.50" class="w-full custom-range">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>ペタッ (0.05)</span>
+            <span>基準向上 (0.40)</span>
+            <span>激しく跳ねる (0.85)</span>
+          </div>
+        </div>
+
+        <!-- 4. 吹き飛び比率 -->
+        <div class="space-y-1">
+          <div class="flex justify-between text-xs font-semibold">
+            <span class="text-slate-300">🎯 定規同士の吹き飛び比率 (自分 : 相手)</span>
+            <span id="label-knockback" class="text-amber-400 font-mono">1 : 3.0</span>
+          </div>
+          <input type="range" id="param-knockback" min="1.0" max="5.0" step="0.5" value="3.0" class="w-full custom-range">
+          <div class="flex justify-between text-[10px] text-slate-500">
+            <span>等倍 (1:1.0)</span>
+            <span>基準 (1:3.0)</span>
+            <span>相手超吹き飛び (1:5.0)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 対戦ルール設定 -->
+      <div class="bg-[#171922] p-4 rounded-xl border border-white/10 space-y-4">
+        <span class="text-xs font-bold text-blue-400 flex items-center gap-1.5 border-b border-white/10 pb-2">
+          👥 プレイヤー &amp; 定規編成
+        </span>
+
+        <div>
+          <label class="text-[11px] text-slate-400 mb-1.5 block">参加人数</label>
+          <div class="grid grid-cols-3 gap-2" id="player-count-btns">
+            <button data-count="2" class="p-count-btn bg-blue-600 text-white font-bold py-1.5 rounded-lg text-xs border border-blue-400 transition-all">2人対戦</button>
+            <button data-count="3" class="p-count-btn bg-slate-800 text-slate-300 font-bold py-1.5 rounded-lg text-xs border border-transparent transition-all">3人対戦</button>
+            <button data-count="4" class="p-count-btn bg-slate-800 text-slate-300 font-bold py-1.5 rounded-lg text-xs border border-transparent transition-all">4人対戦</button>
+          </div>
+        </div>
+
+        <div id="player-cards-container" class="space-y-2.5"></div>
+
+        <div class="flex items-center justify-between pt-2 border-t border-white/5">
+          <span class="text-xs text-slate-300">机の上の障害物 (消しゴム・鉛筆等)</span>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="check-obstacles" class="sr-only peer" checked>
+            <div class="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <!-- 最下部 バトル開始ボタン -->
+      <button id="btn-apply-bottom" class="w-full bg-amber-400 hover:bg-amber-300 active:scale-98 text-slate-950 font-black py-3 rounded-xl text-sm shadow-xl flex items-center justify-center gap-2 transition-all">
+        ⚔️ 適用してバトル再開！
+      </button>
+
+    </div>
+  </div>
+</div>
+
+<!-- 確実表示 勝者リザルトモーダル -->
+<div id="result-modal" class="fixed inset-0 bg-black/90 backdrop-blur-md z-[100000] hidden flex-col justify-center items-center p-4">
+  <div class="bg-[#1f222e] text-white p-7 rounded-2xl w-full max-w-sm text-center border border-white/20 shadow-2xl">
+    <div class="text-6xl mb-2 animate-bounce">🏆</div>
+    <div id="result-winner-title" class="text-2xl font-black mb-1">Player 1 の勝利！</div>
+    <div id="result-winner-desc" class="text-xs text-slate-400 mb-6">使用定規: 15cm定規</div>
+
+    <div class="flex gap-2.5 justify-center">
+      <button id="btn-rematch" class="flex-1 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black py-2.5 rounded-xl text-sm shadow-lg active:scale-95 transition-all">
+        ⚔️ もう一度対戦
+      </button>
+      <button id="btn-home" class="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-2.5 rounded-xl text-sm shadow-lg active:scale-95 transition-all">
+        🏠 ホーム (設定)
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   1. サウンド制御 (衝突音 & ボタンタップ音のみ)
+========================================================= */
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playClickSound() {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'sine';
+  osc.frequency.setValueAtTime(650, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(1100, audioCtx.currentTime + 0.035);
+  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.035);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.035);
+}
+
+function playHitSound(vol = 1) {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(60, audioCtx.currentTime + 0.06);
+  gain.gain.setValueAtTime(Math.min(0.3 * vol, 0.45), audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.06);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.06);
+}
+
+/* =========================================================
+   2. 物理パラメータ（画像の設定値を完全標準化）
+========================================================= */
+const DEFAULT_PHYSICS = {
+  maxPower: 28.5,
+  friction: 0.930,
+  restitution: 0.50,
+  knockbackRatio: 3.0
+};
+
+let physics = { ...DEFAULT_PHYSICS };
+
+/* =========================================================
+   3. 定規モデル・形状定義 (数学的重心・分度器刷新)
+========================================================= */
+const RULER_MODELS = {
+  standard: {
+    name: "15cm定規",
+    desc: "標準バランス",
+    shape: 'rect',
+    w: 130, h: 26,
+    mass: 1.0,
+    rotFriction: 0.92,
+    color: '#60a5fa'
+  },
+  triangle: {
+    name: "三角定規",
+    desc: "角掛け回転特化",
+    shape: 'triangle',
+    w: 105, h: 90,
+    mass: 1.15,
+    rotFriction: 0.935,
+    color: '#34d399'
+  },
+  protractor: {
+    name: "分度器",
+    desc: "幾何カーブ受け流し",
+    shape: 'protractor',
+    radius: 56,
+    mass: 0.98,
+    rotFriction: 0.94,
+    color: '#f472b6'
+  },
+  metal: {
+    name: "金属定規",
+    desc: "重量級・高ノックバック",
+    shape: 'rect',
+    w: 140, h: 24,
+    mass: 2.1,
+    rotFriction: 0.91,
+    color: '#cbd5e1'
+  },
+  long: {
+    name: "30cm定規",
+    desc: "超長リーチ・落下注意",
+    shape: 'rect',
+    w: 200, h: 26,
+    mass: 1.4,
+    rotFriction: 0.89,
+    color: '#fbbf24'
+  }
+};
+
+const PLAYER_COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b'];
+
+/* =========================================================
+   4. ゲーム本体設定 & 変数
+========================================================= */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let width, height;
+let desk = { x: 0, y: 0, w: 0, h: 0 };
+
+let players = [];
+let obstacles = [];
+let turnIndex = 0;
+let gameState = 'AIMING';
+let gameOverTriggered = false;
+
+let isDragging = false;
+let dragStart = { x: 0, y: 0 };
+let dragCurrent = { x: 0, y: 0 };
+let spinOffset = 0;
+
+let currentSelectedCount = 2;
+let playerSettings = [
+  { type: 'human', ruler: 'standard' },
+  { type: 'CPU (中級)', ruler: 'triangle' },
+  { type: 'CPU (中級)', ruler: 'protractor' },
+  { type: 'CPU (上級)', ruler: 'metal' }
+];
+
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+
+  const maxW = Math.min(width * 0.90, 860);
+  const maxH = Math.min(height * 0.72, 530);
+  desk.w = maxW;
+  desk.h = maxH;
+  desk.x = (width - desk.w) / 2;
+  desk.y = (height - desk.h) / 2 - 12; // 下部UIの余白確保
+}
+window.addEventListener('resize', resize);
+resize();
+
+/* =========================================================
+   5. SAT凸ポリゴン幾何計算
+========================================================= */
+function getVertices(obj) {
+  const cos = Math.cos(obj.angle);
+  const sin = Math.sin(obj.angle);
+  const rot = (px, py) => ({
+    x: obj.x + px * cos - py * sin,
+    y: obj.y + px * sin + py * cos
+  });
+
+  if (obj.shape === 'rect') {
+    const hw = obj.w / 2;
+    const hh = obj.h / 2;
+    return [
+      rot(-hw, -hh), rot(hw, -hh),
+      rot(hw, hh), rot(-hw, hh)
+    ];
+  } else if (obj.shape === 'triangle') {
+    const b = obj.w, h = obj.h;
+    return [
+      rot(-b/3, -h/3),
+      rot(2*b/3, -h/3),
+      rot(-b/3, 2*h/3)
+    ];
+  } else if (obj.shape === 'protractor') {
+    const R = obj.radius;
+    const cyOffset = (4 * R) / (3 * Math.PI); // 重心原点補正
+    const verts = [];
+    const segments = 10;
+    for (let i = 0; i <= segments; i++) {
+      const th = Math.PI * (i / segments);
+      verts.push(rot(R * Math.cos(th), -R * Math.sin(th) + cyOffset));
+    }
+    verts.push(rot(0, cyOffset));
+    return verts;
+  }
+  return [];
+}
+
+function checkSATCollision(polyA, polyB) {
+  const polys = [polyA, polyB];
+  let minOverlap = Infinity;
+  let smallestAxis = null;
+
+  for (let p = 0; p < 2; p++) {
+    const poly = polys[p];
+    for (let i = 0; i < poly.length; i++) {
+      const next = (i + 1) % poly.length;
+      const edge = { x: poly[next].x - poly[i].x, y: poly[next].y - poly[i].y };
+      const normal = { x: -edge.y, y: edge.x };
+      const len = Math.hypot(normal.x, normal.y);
+      if (len === 0) continue;
+      const axis = { x: normal.x / len, y: normal.y / len };
+
+      let minA = Infinity, maxA = -Infinity;
+      for (const v of polyA) {
+        const d = v.x * axis.x + v.y * axis.y;
+        if (d < minA) minA = d;
+        if (d > maxA) maxA = d;
+      }
+      let minB = Infinity, maxB = -Infinity;
+      for (const v of polyB) {
+        const d = v.x * axis.x + v.y * axis.y;
+        if (d < minB) minB = d;
+        if (d > maxB) maxB = d;
+      }
+
+      if (maxA < minB || maxB < minA) return null;
+
+      const overlap = Math.min(maxA, maxB) - Math.max(minA, minB);
+      if (overlap < minOverlap) {
+        minOverlap = overlap;
+        smallestAxis = axis;
+      }
+    }
+  }
+  return { axis: smallestAxis, depth: minOverlap };
+}
+
+/* =========================================================
+   6. ゲームループ・物理・衝突処理
+========================================================= */
+function initGame() {
+  players = [];
+  obstacles = [];
+  turnIndex = 0;
+  gameState = 'AIMING';
+  gameOverTriggered = false;
+
+  document.getElementById('settings-modal').style.display = 'none';
+  document.getElementById('result-modal').style.display = 'none';
+
+  const spawns = [
+    { x: desk.x + desk.w * 0.25, y: desk.y + desk.h * 0.76, angle: -Math.PI / 2 },
+    { x: desk.x + desk.w * 0.75, y: desk.y + desk.h * 0.24, angle: Math.PI / 2 },
+    { x: desk.x + desk.w * 0.25, y: desk.y + desk.h * 0.24, angle: Math.PI / 2 },
+    { x: desk.x + desk.w * 0.75, y: desk.y + desk.h * 0.76, angle: -Math.PI / 2 }
+  ];
+
+  for (let i = 0; i < currentSelectedCount; i++) {
+    const cfg = playerSettings[i];
+    const ruler = RULER_MODELS[cfg.ruler];
+    const sp = spawns[i];
+    players.push({
+      id: i,
+      name: `P${i + 1} (${cfg.type === 'human' ? 'あなた' : cfg.type})`,
+      isCPU: cfg.type !== 'human',
+      cpuLevel: cfg.type,
+      rulerKey: cfg.ruler,
+      rulerModel: ruler,
+      shape: ruler.shape,
+      w: ruler.w || 0,
+      h: ruler.h || 0,
+      radius: ruler.radius || 0,
+      mass: ruler.mass,
+      rotFriction: ruler.rotFriction,
+      color: PLAYER_COLORS[i],
+      x: sp.x,
+      y: sp.y,
+      vx: 0,
+      vy: 0,
+      angle: sp.angle,
+      omega: 0,
+      dead: false,
+      falling: false,
+      fallScale: 1.0,
+      fallAlpha: 1.0,
+      fallDirection: 'down'
+    });
+  }
+
+  // 障害物の生成
+  if (document.getElementById('check-obstacles').checked) {
+    const obsTypes = [
+      { name: 'eraser', w: 46, h: 26, mass: 0.8, color: '#f8fafc' },
+      { name: 'pencil', w: 100, h: 14, mass: 0.5, color: '#f59e0b' },
+      { name: 'note', w: 72, h: 54, mass: 1.3, color: '#38bdf8' }
+    ];
+    for (let i = 0; i < 4; i++) {
+      const t = obsTypes[Math.floor(Math.random() * obsTypes.length)];
+      obstacles.push({
+        id: `obs_${i}`,
+        shape: 'rect',
+        w: t.w,
+        h: t.h,
+        mass: t.mass,
+        color: t.color,
+        rotFriction: 0.90,
+        x: desk.x + desk.w * 0.35 + Math.random() * (desk.w * 0.3),
+        y: desk.y + desk.h * 0.35 + Math.random() * (desk.h * 0.3),
+        vx: 0,
+        vy: 0,
+        angle: Math.random() * Math.PI,
+        omega: 0,
+        dead: false,
+        falling: false,
+        fallScale: 1.0,
+        fallAlpha: 1.0,
+        fallDirection: 'down'
+      });
+    }
+  }
+
+  updateTurnUI();
+  checkNextTurn();
+}
+
+function checkGameOver() {
+  if (gameOverTriggered) return;
+  const actives = players.filter(p => !p.dead && !p.falling);
+  if (actives.length <= 1) {
+    gameOverTriggered = true;
+    gameState = 'GAMEOVER';
+    const winner = actives.length === 1 ? actives[0] : null;
+    setTimeout(() => {
+      showResultModal(winner);
+    }, 600);
+  }
+}
+
+function showResultModal(winner) {
+  const modal = document.getElementById('result-modal');
+  const title = document.getElementById('result-winner-title');
+  const desc = document.getElementById('result-winner-desc');
+
+  if (winner) {
+    title.textContent = `${winner.name} の勝利！`;
+    title.style.color = winner.color;
+    desc.textContent = `使用定規: ${winner.rulerModel.name} (${winner.rulerModel.desc})`;
+  } else {
+    title.textContent = "引き分け！";
+    title.style.color = "#ffffff";
+    desc.textContent = "全ての定規が落下しました";
+  }
+
+  modal.style.display = 'flex';
+}
+
+function updatePhysics() {
+  const all = [...players, ...obstacles];
+  let moving = false;
+
+  // 1. 移動と摩擦
+  for (const obj of all) {
+    if (obj.dead) continue;
+
+    if (obj.falling) {
+      moving = true;
+      obj.x += obj.vx * 0.5;
+      obj.y += obj.vy * 0.5;
+      obj.angle += obj.omega;
+      obj.fallScale *= 0.94;
+      obj.fallAlpha *= 0.93;
+
+      if (obj.fallScale < 0.12 || obj.fallAlpha < 0.05) {
+        obj.dead = true;
+        obj.falling = false;
+        checkGameOver();
+      }
+      continue;
+    }
+
+    if (Math.abs(obj.vx) > 0.03 || Math.abs(obj.vy) > 0.03 || Math.abs(obj.omega) > 0.005) {
+      moving = true;
+      obj.x += obj.vx;
+      obj.y += obj.vy;
+      obj.angle += obj.omega;
+
+      obj.vx *= physics.friction;
+      obj.vy *= physics.friction;
+      obj.omega *= (obj.rotFriction || 0.92);
+    } else {
+      obj.vx = 0;
+      obj.vy = 0;
+      obj.omega = 0;
+    }
+
+    // 机外落下チェック
+    const outL = obj.x < desk.x;
+    const outR = obj.x > desk.x + desk.w;
+    const outT = obj.y < desk.y;
+    const outB = obj.y > desk.y + desk.h;
+
+    if (outL || outR || outT || outB) {
+      obj.falling = true;
+      obj.fallDirection = outT ? 'up' : 'down';
+      obj.vx *= 0.6;
+      obj.vy *= 0.6;
+      obj.omega += (Math.random() - 0.5) * 0.2;
+      checkGameOver();
+    }
+  }
+
+  // 2. 衝突判定 (定規 vs 障害物 / 定規同士の吹き飛び比率)
+  for (let i = 0; i < all.length; i++) {
+    const a = all[i];
+    if (a.dead || a.falling) continue;
+
+    for (let j = i + 1; j < all.length; j++) {
+      const b = all[j];
+      if (b.dead || b.falling) continue;
+
+      if (Math.hypot(b.x - a.x, b.y - a.y) > 190) continue;
+
+      const polyA = getVertices(a);
+      const polyB = getVertices(b);
+      const col = checkSATCollision(polyA, polyB);
+
+      if (col) {
+        const relSpeed = Math.hypot(a.vx - b.vx, a.vy - b.vy);
+        if (relSpeed > 0.35) {
+          playHitSound(Math.min(relSpeed / 6, 1));
+        }
+
+        const d = { x: b.x - a.x, y: b.y - a.y };
+        if (d.x * col.axis.x + d.y * col.axis.y < 0) {
+          col.axis.x = -col.axis.x;
+          col.axis.y = -col.axis.y;
+        }
+
+        const normal = col.axis;
+        const totalMass = a.mass + b.mass;
+
+        // 定規 vs 障害物: 定規は弾かれず突き進み、障害物は重厚に押される
+        const aIsRuler = a.id !== undefined && !a.id.toString().startsWith('obs');
+        const bIsRuler = b.id !== undefined && !b.id.toString().startsWith('obs');
+
+        if (aIsRuler && !bIsRuler) {
+          // aが定規、bが障害物
+          b.x += normal.x * col.depth;
+          b.y += normal.y * col.depth;
+          b.vx = a.vx * 0.75 + normal.x * 2.0;
+          b.vy = a.vy * 0.75 + normal.y * 2.0;
+          a.vx *= 0.94;
+          a.vy *= 0.94;
+          continue;
+        } else if (!aIsRuler && bIsRuler) {
+          a.x -= normal.x * col.depth;
+          a.y -= normal.y * col.depth;
+          a.vx = b.vx * 0.75 - normal.x * 2.0;
+          a.vy = b.vy * 0.75 - normal.y * 2.0;
+          b.vx *= 0.94;
+          b.vy *= 0.94;
+          continue;
+        }
+
+        // 定規同士の衝突: 吹き飛び比率（自分:1, 相手:KnockbackRatio）
+        a.x -= normal.x * col.depth * (b.mass / totalMass);
+        a.y -= normal.y * col.depth * (b.mass / totalMass);
+        b.x += normal.x * col.depth * (a.mass / totalMass);
+        b.y += normal.y * col.depth * (a.mass / totalMass);
+
+        const speedA = Math.hypot(a.vx, a.vy);
+        const speedB = Math.hypot(b.vx, b.vy);
+        const aIsAttacker = speedA > speedB;
+
+        const kx = a.vx - b.vx;
+        const ky = a.vy - b.vy;
+        const p = 2 * (normal.x * kx + normal.y * ky) / totalMass;
+
+        if (aIsAttacker) {
+          // Aが当てた側: 速度を吸収
+          a.vx -= p * b.mass * normal.x * 0.35;
+          a.vy -= p * b.mass * normal.y * 0.35;
+          // Bが当てられた側: 強く吹き飛ぶ
+          b.vx += p * a.mass * normal.x * (1 + physics.restitution) * (physics.knockbackRatio / 2.0);
+          b.vy += p * a.mass * normal.y * (1 + physics.restitution) * (physics.knockbackRatio / 2.0);
+        } else {
+          // Bが当てた側
+          b.vx += p * a.mass * normal.x * 0.35;
+          b.vy += p * a.mass * normal.y * 0.35;
+          // Aが当てられた側
+          a.vx -= p * b.mass * normal.x * (1 + physics.restitution) * (physics.knockbackRatio / 2.0);
+          a.vy -= p * b.mass * normal.y * (1 + physics.restitution) * (physics.knockbackRatio / 2.0);
+        }
+
+        a.omega += (Math.random() - 0.5) * 0.08;
+        b.omega += (Math.random() - 0.5) * 0.08;
+      }
+    }
+  }
+
+  if (gameState === 'MOVING') {
+    if (!moving) {
+      checkGameOver();
+      if (!gameOverTriggered) {
+        nextTurn();
+      }
+    }
+  }
+}
+
+/* =========================================================
+   7. ターン進行 & CPU
+========================================================= */
+function updateTurnUI() {
+  const cur = players[turnIndex];
+  if (!cur) return;
+  document.getElementById('turn-text').textContent = `${cur.name} のターン`;
+  document.getElementById('turn-indicator').style.backgroundColor = cur.color;
+  document.getElementById('spin-slider').value = 0;
+  document.getElementById('spin-val').textContent = "0%";
+  spinOffset = 0;
+}
+
+function nextTurn() {
+  let count = 0;
+  do {
+    turnIndex = (turnIndex + 1) % players.length;
+    count++;
+  } while ((players[turnIndex].dead || players[turnIndex].falling) && count <= players.length);
+
+  checkGameOver();
+  if (gameOverTriggered) return;
+
+  gameState = 'AIMING';
+  updateTurnUI();
+  checkNextTurn();
+}
+
+function checkNextTurn() {
+  const cur = players[turnIndex];
+  if (cur && cur.isCPU && !cur.dead && !cur.falling) {
+    setTimeout(executeCPUTurn, 600);
+  }
+}
+
+function executeCPUTurn() {
+  if (gameState !== 'AIMING' || gameOverTriggered) return;
+  const cpu = players[turnIndex];
+  if (!cpu || cpu.dead || cpu.falling) return;
+
+  const enemies = players.filter(p => p.id !== cpu.id && !p.dead && !p.falling);
+  if (enemies.length === 0) return;
+
+  let target = enemies[0];
+  let minDist = Infinity;
+  for (const e of enemies) {
+    const d = Math.hypot(e.x - cpu.x, e.y - cpu.y);
+    if (d < minDist) {
+      minDist = d;
+      target = e;
+    }
+  }
+
+  const dx = target.x - cpu.x;
+  const dy = target.y - cpu.y;
+  let angle = Math.atan2(dy, dx);
+  let powerRatio = Math.min(minDist / (desk.w * 0.65), 0.85);
+  let spin = 0;
+
+  if (cpu.cpuLevel.includes('初級')) {
+    angle += (Math.random() - 0.5) * 0.8;
+    powerRatio *= 0.6 + Math.random() * 0.4;
+  } else if (cpu.cpuLevel.includes('中級')) {
+    angle += (Math.random() - 0.5) * 0.2;
+    powerRatio = Math.min(powerRatio * 1.05, 0.9);
+  } else {
+    // 上級
+    const edgeX = target.x < desk.x + desk.w/2 ? desk.x - 20 : desk.x + desk.w + 20;
+    const edgeY = target.y < desk.y + desk.h/2 ? desk.y - 20 : desk.y + desk.h + 20;
+    const pushAngle = Math.atan2(edgeY - target.y, edgeX - target.x);
+    angle = angle * 0.7 + pushAngle * 0.3;
+    powerRatio = Math.min(Math.max(powerRatio * 1.15, 0.5), 0.95);
+    spin = (Math.random() - 0.5) * 0.7;
+  }
+
+  shoot(cpu, angle, powerRatio, spin);
+}
+
+function shoot(obj, angle, powerRatio, spin) {
+  const p = Math.max(0.15, Math.min(powerRatio, 1.0)) * physics.maxPower;
+  obj.vx = Math.cos(angle) * p;
+  obj.vy = Math.sin(angle) * p;
+  obj.omega = spin * 0.38; // スピン強化
+  gameState = 'MOVING';
+}
+
+/* =========================================================
+   8. 描画 (上側落下時の奥レイヤー)
+========================================================= */
+function draw() {
+  ctx.clearRect(0, 0, width, height);
+
+  // 背景
+  ctx.fillStyle = '#181920';
+  ctx.fillRect(0, 0, width, height);
+
+  // 1. 【奥レイヤー】：上側（奥）へ落下中のオブジェクト
+  const all = [...players, ...obstacles];
+  for (const obj of all) {
+    if (obj.falling && obj.fallDirection === 'up' && !obj.dead) {
+      drawObject(obj);
+    }
+  }
+
+  // 2. 【机の天板】
+  drawDesk();
+
+  // 3. 【机の上のオブジェクト】
+  for (const obj of all) {
+    if (!obj.dead && (!obj.falling || obj.fallDirection === 'down')) {
+      drawObject(obj);
+    }
+  }
+
+  // 4. 【照準ガイド】
+  if (gameState === 'AIMING' && isDragging) {
+    drawAimGuide();
+  }
+
+  updatePhysics();
+  requestAnimationFrame(draw);
+}
+
+function drawDesk() {
+  ctx.save();
+  // 影
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fillRect(desk.x + 8, desk.y + 12, desk.w, desk.h);
+
+  // 木目天板
+  const grad = ctx.createLinearGradient(desk.x, desk.y, desk.x + desk.w, desk.y + desk.h);
+  grad.addColorStop(0, '#8d5b36');
+  grad.addColorStop(0.5, '#7a4b27');
+  grad.addColorStop(1, '#663c19');
+  ctx.fillStyle = grad;
+  ctx.fillRect(desk.x, desk.y, desk.w, desk.h);
+
+  // 木目ライン
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.07)';
+  ctx.lineWidth = 2;
+  for (let i = 1; i < 6; i++) {
+    const y = desk.y + (desk.h / 6) * i;
+    ctx.beginPath();
+    ctx.moveTo(desk.x, y);
+    ctx.lineTo(desk.x + desk.w, y);
+    ctx.stroke();
+  }
+
+  // 机枠
+  ctx.strokeStyle = '#4a2b13';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(desk.x, desk.y, desk.w, desk.h);
+  ctx.restore();
+}
+
+function drawObject(obj) {
+  ctx.save();
+  ctx.translate(obj.x, obj.y);
+  ctx.rotate(obj.angle);
+
+  if (obj.falling) {
+    ctx.scale(obj.fallScale, obj.fallScale);
+    ctx.globalAlpha = Math.max(0, obj.fallAlpha);
+  } else {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 3;
+    ctx.shadowOffsetY = 4;
+  }
+
+  ctx.fillStyle = obj.color;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.lineWidth = 1.5;
+
+  if (obj.shape === 'rect') {
+    ctx.beginPath();
+    ctx.roundRect(-obj.w / 2, -obj.h / 2, obj.w, obj.h, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // 定規の目盛り
+    if (obj.id !== undefined && !obj.id.toString().startsWith('obs')) {
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 1;
+      const step = 6;
+      for (let x = -obj.w / 2 + 6; x < obj.w / 2 - 6; x += step) {
+        ctx.beginPath();
+        ctx.moveTo(x, -obj.h / 2);
+        ctx.lineTo(x, -obj.h / 2 + (x % (step * 5) === 0 ? 8 : 4));
+        ctx.stroke();
+      }
+    }
+  } else if (obj.shape === 'triangle') {
+    const b = obj.w, h = obj.h;
+    ctx.beginPath();
+    ctx.moveTo(-b/3, -h/3);
+    ctx.lineTo(2*b/3, -h/3);
+    ctx.lineTo(-b/3, 2*h/3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.moveTo(-b/3 + 12, -h/3 + 12);
+    ctx.lineTo(2*b/3 - 24, -h/3 + 12);
+    ctx.lineTo(-b/3 + 12, 2*h/3 - 24);
+    ctx.closePath();
+    ctx.fill();
+  } else if (obj.shape === 'protractor') {
+    const R = obj.radius;
+    const cyOffset = (4 * R) / (3 * Math.PI);
+
+    ctx.beginPath();
+    ctx.arc(0, cyOffset, R, Math.PI, 0, false);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    // 内側の穴
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.beginPath();
+    ctx.arc(0, cyOffset, R * 0.5, Math.PI, 0, false);
+    ctx.closePath();
+    ctx.fill();
+
+    // 放射目盛り
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 1;
+    for (let d = 0; d <= 180; d += 15) {
+      const rad = Math.PI * (d / 180);
+      const x1 = (R - 7) * Math.cos(rad);
+      const y1 = cyOffset - (R - 7) * Math.sin(rad);
+      const x2 = R * Math.cos(rad);
+      const y2 = cyOffset - R * Math.sin(rad);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawAimGuide() {
+  const cur = players[turnIndex];
+  if (!cur) return;
+
+  const dx = dragStart.x - dragCurrent.x;
+  const dy = dragStart.y - dragCurrent.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 10) return;
+
+  const maxDist = 180;
+  const powerRatio = Math.min(dist / maxDist, 1.0);
+  const angle = Math.atan2(dy, dx);
+
+  ctx.save();
+  ctx.strokeStyle = cur.color;
+  ctx.lineWidth = 3;
+  ctx.setLineDash([6, 6]);
+
+  const trajLen = powerRatio * 210;
+  const targetX = cur.x + Math.cos(angle) * trajLen;
+  const targetY = cur.y + Math.sin(angle) * trajLen;
+  const perpX = -Math.sin(angle) * (spinOffset * 55 * powerRatio);
+  const perpY = Math.cos(angle) * (spinOffset * 55 * powerRatio);
+
+  ctx.beginPath();
+  ctx.moveTo(cur.x, cur.y);
+  ctx.quadraticCurveTo(
+    (cur.x + targetX) / 2 + perpX,
+    (cur.y + targetY) / 2 + perpY,
+    targetX, targetY
+  );
+  ctx.stroke();
+
+  ctx.restore();
+  ctx.save();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText(`${Math.round(powerRatio * 100)}%`, cur.x - 12, cur.y - 30);
+  ctx.restore();
+}
+
+/* =========================================================
+   9. タッチ / マウスイベント
+========================================================= */
+function getEventPos(e) {
+  if (e.touches && e.touches.length > 0) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  return { x: e.clientX, y: e.clientY };
+}
+
+function onPointerDown(e) {
+  if (gameState !== 'AIMING' || gameOverTriggered) return;
+  const cur = players[turnIndex];
+  if (!cur || cur.isCPU) return;
+
+  const pos = getEventPos(e);
+  if (Math.hypot(pos.x - cur.x, pos.y - cur.y) < 85) {
+    isDragging = true;
+    dragStart = { x: cur.x, y: cur.y };
+    dragCurrent = pos;
+  }
+}
+
+function onPointerMove(e) {
+  if (!isDragging) return;
+  dragCurrent = getEventPos(e);
+}
+
+function onPointerUp() {
+  if (!isDragging) return;
+  isDragging = false;
+
+  const cur = players[turnIndex];
+  const dx = dragStart.x - dragCurrent.x;
+  const dy = dragStart.y - dragCurrent.y;
+  const dist = Math.hypot(dx, dy);
+
+  if (dist > 15) {
+    const angle = Math.atan2(dy, dx);
+    const powerRatio = Math.min(dist / 180, 1.0);
+    shoot(cur, angle, powerRatio, spinOffset);
+  }
+}
+
+window.addEventListener('mousedown', onPointerDown);
+window.addEventListener('mousemove', onPointerMove);
+window.addEventListener('mouseup', onPointerUp);
+
+window.addEventListener('touchstart', onPointerDown, { passive: false });
+window.addEventListener('touchmove', onPointerMove, { passive: false });
+window.addEventListener('touchend', onPointerUp, { passive: false });
+
+// スピンバー
+const spinSlider = document.getElementById('spin-slider');
+spinSlider.addEventListener('input', (e) => {
+  const val = parseInt(e.target.value);
+  spinOffset = val / 100;
+  document.getElementById('spin-val').textContent = `${val > 0 ? '+' : ''}${val}%`;
+});
+
+/* =========================================================
+   10. UI & モーダルイベント
+========================================================= */
+const settingsModal = document.getElementById('settings-modal');
+const btnOpenSettings = document.getElementById('btn-open-settings');
+const btnCloseModal = document.getElementById('btn-close-modal');
+const btnApplyTop = document.getElementById('btn-apply-top');
+const btnApplyBottom = document.getElementById('btn-apply-bottom');
+const btnResetPhysics = document.getElementById('btn-reset-physics');
+
+// 物理スライダー
+const paramPower = document.getElementById('param-power');
+const paramFriction = document.getElementById('param-friction');
+const paramRestitution = document.getElementById('param-restitution');
+const paramKnockback = document.getElementById('param-knockback');
+
+const labelPower = document.getElementById('label-power');
+const labelFriction = document.getElementById('label-friction');
+const labelRestitution = document.getElementById('label-restitution');
+const labelKnockback = document.getElementById('label-knockback');
+
+function updatePhysicsLabels() {
+  physics.maxPower = parseFloat(paramPower.value);
+  physics.friction = parseFloat(paramFriction.value);
+  physics.restitution = parseFloat(paramRestitution.value);
+  physics.knockbackRatio = parseFloat(paramKnockback.value);
+
+  labelPower.textContent = physics.maxPower.toFixed(1);
+  labelFriction.textContent = physics.friction.toFixed(3);
+  labelRestitution.textContent = physics.restitution.toFixed(2);
+  labelKnockback.textContent = `1 : ${physics.knockbackRatio.toFixed(1)}`;
+}
+
+[paramPower, paramFriction, paramRestitution, paramKnockback].forEach(input => {
+  input.addEventListener('input', updatePhysicsLabels);
+});
+
+btnResetPhysics.addEventListener('click', () => {
+  playClickSound();
+  paramPower.value = DEFAULT_PHYSICS.maxPower;
+  paramFriction.value = DEFAULT_PHYSICS.friction;
+  paramRestitution.value = DEFAULT_PHYSICS.restitution;
+  paramKnockback.value = DEFAULT_PHYSICS.knockbackRatio;
+  updatePhysicsLabels();
+});
+
+// 人数選択
+const pCountBtns = document.querySelectorAll('.p-count-btn');
+const playerCardsContainer = document.getElementById('player-cards-container');
+
+function renderPlayerCards(count) {
+  playerCardsContainer.innerHTML = '';
+  for (let i = 0; i < count; i++) {
+    const cfg = playerSettings[i];
+    const card = document.createElement('div');
+    card.className = 'grid grid-cols-2 gap-2 bg-[#12141c] p-2.5 rounded-lg border-l-4';
+    card.style.borderLeftColor = PLAYER_COLORS[i];
+    card.innerHTML = `
+      <div>
+        <label class="text-[10px] text-slate-400 block mb-1">P${i + 1} タイプ</label>
+        <select class="p-type-select w-full bg-[#1e212b] text-white text-xs p-1.5 rounded-md border border-white/10" data-idx="${i}">
+          <option value="human" ${cfg.type === 'human' ? 'selected' : ''}>あなた (手動)</option>
+          <option value="CPU (初級)" ${cfg.type === 'CPU (初級)' ? 'selected' : ''}>CPU (初級)</option>
+          <option value="CPU (中級)" ${cfg.type === 'CPU (中級)' ? 'selected' : ''}>CPU (中級)</option>
+          <option value="CPU (上級)" ${cfg.type === 'CPU (上級)' ? 'selected' : ''}>CPU (上級)</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-[10px] text-slate-400 block mb-1">使用定規</label>
+        <select class="p-ruler-select w-full bg-[#1e212b] text-white text-xs p-1.5 rounded-md border border-white/10" data-idx="${i}">
+          <option value="standard" ${cfg.ruler === 'standard' ? 'selected' : ''}>15cm定規</option>
+          <option value="triangle" ${cfg.ruler === 'triangle' ? 'selected' : ''}>三角定規</option>
+          <option value="protractor" ${cfg.ruler === 'protractor' ? 'selected' : ''}>分度器</option>
+          <option value="metal" ${cfg.ruler === 'metal' ? 'selected' : ''}>金属定規</option>
+          <option value="long" ${cfg.ruler === 'long' ? 'selected' : ''}>30cm定規</option>
+        </select>
+      </div>
+    `;
+    playerCardsContainer.appendChild(card);
+  }
+
+  // 選択イベント
+  document.querySelectorAll('.p-type-select').forEach(sel => {
+    sel.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      playerSettings[idx].type = e.target.value;
+    });
+  });
+  document.querySelectorAll('.p-ruler-select').forEach(sel => {
+    sel.addEventListener('change', (e) => {
+      const idx = parseInt(e.target.dataset.idx);
+      playerSettings[idx].ruler = e.target.value;
+    });
+  });
+}
+
+pCountBtns.forEach(btn => {
+  btn.addEventListener('click', () => {
+    playClickSound();
+    currentSelectedCount = parseInt(btn.dataset.count);
+    pCountBtns.forEach(b => {
+      b.classList.remove('bg-blue-600', 'text-white', 'border-blue-400');
+      b.classList.add('bg-slate-800', 'text-slate-300', 'border-transparent');
+    });
+    btn.classList.add('bg-blue-600', 'text-white', 'border-blue-400');
+    btn.classList.remove('bg-slate-800', 'text-slate-300', 'border-transparent');
+    renderPlayerCards(currentSelectedCount);
+  });
+});
+
+btnOpenSettings.addEventListener('click', () => {
+  playClickSound();
+  settingsModal.style.display = 'flex';
+});
+
+btnCloseModal.addEventListener('click', () => {
+  playClickSound();
+  settingsModal.style.display = 'none';
+});
+
+const applyAndStart = () => {
+  playClickSound();
+  updatePhysicsLabels();
+  initGame();
+};
+
+btnApplyTop.addEventListener('click', applyAndStart);
+btnApplyBottom.addEventListener('click', applyAndStart);
+
+// リザルトボタン
+document.getElementById('btn-rematch').addEventListener('click', () => {
+  playClickSound();
+  initGame();
+});
+
+document.getElementById('btn-home').addEventListener('click', () => {
+  playClickSound();
+  document.getElementById('result-modal').style.display = 'none';
+  settingsModal.style.display = 'flex';
+});
+
+// 初期セットアップ
+renderPlayerCards(currentSelectedCount);
+updatePhysicsLabels();
+settingsModal.style.display = 'flex'; // 初回設定画面でスタンバイ
+
+// アニメーションループ開始
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
